@@ -1,19 +1,14 @@
 ---
-title: "PAPER TITLE XXX"
-author: "Tournier-Broer R., Ayata S-D. and Biard T."
-date: "XXX"
-output:
-  html_document: 
-    theme: cerulean
-    code_folding: hide
-    highlight: pygments
-  df_print : paged
+title: "Small in the heat, transparent in the bloom: copepod morphological responses in the California upwelling ecosystem"
+author: "Rubén Tournier-Broer, Sakina Dorothée-Ayata, Tristan Biard"
+output: html_document
 ---
 
 # Charge packages
-```{r Charge packages}
+```{r Charge packages, message=FALSE, warning=FALSE}
 library(ggplot2) # For plot
 library(raster) # For map
+library(maps) # For map background
 library(sp) # For package raster
 library(ncdf4) # For combining nc files
 library(morphr) # For image manipulation
@@ -22,7 +17,6 @@ library(bestNormalize) # For Yeo-Johnson transformation
 library(FactoMineR) # For PCA
 library(stringr) # For character manipulation
 library(ggrepel) # For proper text ploting
-library(cowplot) # For proper graph plot
 library(gridExtra) # For plot of multiple graph
 library(grid) # For plot of multiple graph too
 library(tidyr) # For df manipulation
@@ -30,27 +24,29 @@ library(ggridges) # For better density graph
 library(rstatix) # Stat test tools
 library(ggpubr) # For specific boxplot
 library(patchwork) # For some graph agregation
-
+library(scales) # For number adjustement
 ```
 
 # Load data
 ```{r Load data}
-# Individual copepod data
+
+# Copepod data
 ind_data <- read.csv("data/ind_data.csv", sep = ',', header = TRUE)
 
-```
-
-# I. Environmental analysis
-
-## a) Cruise maps 
-```{r  Cruise maps, fig.width = 4, fig.height = 3}
-# List of NetCDF files
+# NetCDF files
 nc_files <- list(
   "2008" = "data/SST2008.nc",
   "2012" = "data/SST2012.nc",
   "2014" = "data/SST2014.nc",
   "2016" = "data/SST2016.nc"
 )
+
+```
+
+# I. Environmental analysis
+
+## a) Cruise maps 
+```{r Cruise maps, fig.height=5, fig.width=6}
 
 # Define the bounding box for California
 california_bbox <- extent(-125,-119, 32, 36)
@@ -88,40 +84,56 @@ combined_SST_df <- combined_SST_df %>%
     )
   )
 
-# Plot the maps
-ggplot() +
-  geom_tile(data = combined_SST_df, aes(x = Longitude, y = Latitude, fill = Temperature)) +
-  geom_point(data = ind_data,
-             aes(x = Longitude, y = Latitude, color = Cycle),
-             size = 1) +
-  borders(
-    "world",
-    regions = "USA",
+# Charge map
+usa_map <- map_data("world", region = "USA") 
+
+FigS1 <- ggplot() +
+  geom_tile(
+    data = combined_SST_df,
+    aes(x = Longitude, y = Latitude, fill = Temperature)
+  ) +
+  geom_point(
+    data = ind_data,
+    aes(x = Longitude, y = Latitude, color = Cycle),
+    size = 1
+  ) +
+  geom_polygon(
+    data = usa_map,
+    aes(x = long, y = lat, group = group),
+    inherit.aes = FALSE,
+    fill = "bisque",
+    color = "black",
+    linewidth = 0.2
+  ) +
+  scale_fill_distiller(
+    name = "Temperature (°C)",
+    palette = "Spectral",
+    direction = -1
+  ) +
+  coord_fixed(
     xlim = california_bbox[c(1, 2)],
     ylim = california_bbox[c(3, 4)],
-    colour = "black",
-    fill = "bisque"
+    expand = FALSE
   ) +
-  scale_fill_distiller(name = "Temperature (°C)",
-                       palette = "Spectral",
-                       direction = -1) +
-  coord_fixed(xlim = california_bbox[c(1, 2)],
-              ylim = california_bbox[c(3, 4)],
-              expand = FALSE) +
-  labs(x = "Longitude", y = "Latitude") +
-  facet_wrap( ~ Cruise_season, ncol = 2) +
-  theme_minimal() +
+  scale_x_continuous(
+    name = "Longitude",
+    labels = function(x) paste0(x, "°")
+  ) +
+  scale_y_continuous(
+    name = "Latitude",
+    labels = function(y) paste0(y, "°")
+  ) +
+  facet_wrap(~ Cruise_season, ncol = 2) +
+  theme_bw() +
   theme(
     legend.position = "bottom",
-    axis.text.x = element_text(
-      angle = 45,
-      hjust = 1,
-      size = 8
-    ),
+    axis.text.x = element_text(size = 8),
     axis.text.y = element_text(size = 8),
     strip.text = element_text(size = 12),
     panel.spacing = unit(1.5, "lines")
   )
+
+ggsave("FigS1.png", plot = FigS1, units = "in", width = 8, height = 7, dpi = 450, device = "png")
 
 ```
 
@@ -149,7 +161,6 @@ abiotic_supp_columns <-
   c(
     "Temp",
     "Sal",
-    "Condu",
     "Oxy",
     "Fluo",
     "Part",
@@ -171,9 +182,7 @@ traits_columns <-
     "perim.",
     "circ.",
     "elongation",
-    #"thickr", #
     "symetriev",
-    #"symetrievc", #
     "meanpos",
     "stddev",
     "skew",
@@ -191,22 +200,26 @@ Paired_year <- palette.colors(palette = "Paired")[c(2, 4, 6, 8)]
 ind_data_surf <-
   ind_data %>% filter(Depth >= epipelagic)
 
+# Reverse depth for clarity
+ind_data_surf$Depth_original <- ind_data_surf$Depth
+ind_data_surf$Depth <- max(ind_data_surf$Depth_original) - ind_data_surf$Depth_original
+
 # Scale morphological traits between UVP
 ind_data_surf_scaled <- ind_data_surf %>%
   group_by(Cruise) %>%
   mutate(median = scale(median),
          histcum3 = scale(histcum3))
 
-# Scale only specific columns (trait and environmental)
-ind_data_surf_scaled[, traits_columns] <-
-  scale(ind_data_surf_scaled[, traits_columns])
-ind_data_surf_scaled[, env_columns] <-
-  scale(ind_data_surf_scaled[, env_columns])
-
 # Apply Yeo-Johnson Transformation on trait data
 ind_data_surf_scaled[, traits_columns] <-
   sapply(ind_data_surf_scaled[, traits_columns], function(x)
     yeojohnson(x)$x.t)
+
+ind_data_surf_scaled[, traits_columns] <-
+  scale(ind_data_surf_scaled[, traits_columns])
+
+# Scale environmental columns 
+ind_data_surf_scaled[, env_columns] <- scale(ind_data_surf_scaled[, env_columns])
 
 # Function to visualise morphological traits distribution
 density_plot_traits <- function(data, traits_columns, title) {
@@ -227,9 +240,9 @@ density_plot_traits <- function(data, traits_columns, title) {
     scale_fill_manual(values = Paired_year) +
     ggtitle(title) +
     theme(
-      plot.title = element_text(size = 20, face = "bold"),
+      plot.title = element_text(size = 25, face = "bold"),
       axis.title = element_text(size = 20),
-      axis.text = element_text(size = 20),
+      axis.text = element_text(size = 12),
       strip.text = element_text(size = 25),
       legend.position = "none"
     )
@@ -237,16 +250,18 @@ density_plot_traits <- function(data, traits_columns, title) {
 
 # Morphological traits before normalization
 plot_before <- density_plot_traits(ind_data_surf,
-                    traits_columns,
-                    "Morphological traits before normalization")
+                    traits_columns, labs(title = "Before Normalization")) + labs(title = NULL)
 
 # Morphological traits after normalization
 plot_after <- density_plot_traits(ind_data_surf_scaled,
-                    traits_columns,
-                    "Morphological traits after normalization")
+                    traits_columns, labs(title = "After Normalization")) + labs(title = NULL)
 
-# 
-grid.arrange(plot_before, plot_after, ncol = 2)
+#
+FigS3 <- grid.arrange(
+  arrangeGrob(plot_before, grid.rect(gp = gpar(col = NA)), plot_after, ncol = 3, widths = c(1, 0.1, 1))
+)
+
+ggsave("FigS3.png", plot = FigS3, units = "in", width = 18, height = 12, dpi = 450, device = "png")
 
 ```
 
@@ -262,8 +277,6 @@ factor_vec <- factor(
     "Size",
     "Size",
     "Size",
-    #"Shape",
-    #"Shape",
     "Shape",
     "Shape",
     "Shape",
@@ -278,7 +291,6 @@ factor_vec <- factor(
   )
 )
 
-## Above the MLD (shorten "surf")
 # PCA on morphological traits without supplementary variable (weight by image volume)
 pca_surf <- 
   PCA(ind_data_surf_scaled[, c(traits_columns)],
@@ -313,11 +325,104 @@ ggplot(eig_surf) + geom_bar(aes(x = nb, y = prop), stat = "identity") +
   ylab("Proportion") +
   ggtitle("Above MLD - Proportion of Eigenvalues")
 
+
+# Extract correlation coefficients
+coords_biotic <- pca_biotic_surf$quanti.sup$cor[, 1:4]
+supp_biotic   <- ind_data_surf_scaled[, biotic_supp_columns]
+pc_scores     <- pca_biotic_surf$ind$coord[, 1:4]
+
+# Create empty p-value matrix
+pvals_biotic <- matrix(NA, nrow = nrow(coords_biotic), ncol = 4)
+rownames(pvals_biotic) <- rownames(coords_biotic)
+colnames(pvals_biotic) <- colnames(coords_biotic)
+
+# Compute p-values by correlation testing
+for(i in seq_len(nrow(coords_biotic))) {
+  for(j in 1:4) {
+    test_out <- cor.test(supp_biotic[[i]], pc_scores[, j])
+    pvals_biotic[i, j] <- test_out$p.value
+  }
+}
+
+#Convert p-values to significance stars
+pval_to_stars <- function(p) {
+  if (p < 0.001) return("***")
+  if (p < 0.01)  return("**")
+  if (p < 0.05)  return("*")
+  return("ns")
+}
+
+sig_biotic <- apply(pvals_biotic, c(1,2), pval_to_stars)
+
+#Round r values to 4 decimals
+coords_biotic_round <- round(coords_biotic, 4)
+
+#Build final combined table
+combined_table <- data.frame(
+  Variable = rownames(coords_biotic),
+  Dim1_r   = coords_biotic_round[,1],
+  Dim1_sig = sig_biotic[,1],
+  Dim2_r   = coords_biotic_round[,2],
+  Dim2_sig = sig_biotic[,2],
+  Dim3_r   = coords_biotic_round[,3],
+  Dim3_sig = sig_biotic[,3],
+  Dim4_r   = coords_biotic_round[,4],
+  Dim4_sig = sig_biotic[,4],
+  row.names = NULL
+)
+
+# Extract correlation coefficients
+coords_abiotic <- pca_abiotic_surf$quanti.sup$cor[, 1:4]
+supp_abiotic   <- ind_data_surf_scaled[, abiotic_supp_columns]
+pc_scores2     <- pca_abiotic_surf$ind$coord[, 1:4]
+
+# Create empty p-value matrix
+pvals_abiotic <- matrix(NA, nrow = nrow(coords_abiotic), ncol = 4)
+rownames(pvals_abiotic) <- rownames(coords_abiotic)
+colnames(pvals_abiotic) <- colnames(coords_abiotic)
+
+# Compute p-values by correlation testing
+for(i in seq_len(nrow(coords_abiotic))) {
+  for(j in 1:4) {
+    test_out <- cor.test(supp_abiotic[[i]], pc_scores2[, j])
+    pvals_abiotic[i, j] <- test_out$p.value
+  }
+}
+
+# Convert p-values to significance stars
+pval_to_stars <- function(p) {
+  if (p < 0.001) return("***")
+  if (p < 0.01)  return("**")
+  if (p < 0.05)  return("*")
+  return("ns")
+}
+
+sig_abiotic <- apply(pvals_abiotic, c(1,2), pval_to_stars)
+
+# Round correlation coefficients to 4 decimals
+coords_abiotic_round <- round(coords_abiotic, 4)
+
+# Build final combined table
+combined_table_abiotic <- data.frame(
+  Variable = rownames(coords_abiotic),
+  Dim1_r   = coords_abiotic_round[,1],
+  Dim1_sig = sig_abiotic[,1],
+  Dim2_r   = coords_abiotic_round[,2],
+  Dim2_sig = sig_abiotic[,2],
+  Dim3_r   = coords_abiotic_round[,3],
+  Dim3_sig = sig_abiotic[,3],
+  Dim4_r   = coords_abiotic_round[,4],
+  Dim4_sig = sig_abiotic[,4],
+  row.names = NULL
+)
+
+
 ```
 
 
+
 ## c) Plot morphospace above the MLD
-```{r Plot morphospace above the MLD, fig.width = 8, fig.height = 10}
+```{r Plot morphospace above the MLD, fig.width = 5, fig.height = 11}
 
 # Store names for PCA axes
 text1_PC1_PC2_surf <-
@@ -338,12 +443,13 @@ img_png_surf <- file.path(
 # Correction factor for axes size
 axis_size = 6
 text_size = 6
-legend_size = 18
+legend_size = 16
 title_size = 18
-larger_legend_size <- legend_size * 1.2
+larger_legend_size <- legend_size * 0.9
+
 morphr_steps = 20
-morphr_imgs = 5
-morphr_scale = 0.015
+morphr_imgs = 1
+morphr_scale = 0.01 
 
 # Count copepods used in PCA
 n_individuals_surf <- nrow(pca_surf$ind$coord)
@@ -354,15 +460,28 @@ stations_scores_surf <- data.frame(pca_surf$ind$coord)
 stations_scores_surf <- cbind(
   stations_scores_surf,
   select(
-    ind_data_surf_scaled,
+    ind_data_surf,
     Cruise_season,
     Cruise,
     Site,
     Cflux,
     DayNight,
-    orig_id
+    orig_id,
+    median,
+    Temp,
+    Sal,
+    Oxy,
+    Fluo,
+    Part,
+    Depth,
+    PO4,
+    SiOH4,
+    NO2,
+    NO3,
+    NH4
   )
 )
+
 stations_scores_surf$Cruise_site <-
   paste(stations_scores_surf$Cruise, stations_scores_surf$Site, sep = "_")
 
@@ -399,7 +518,7 @@ filtered_sup_abiotic_Dim3_Dim4_surf <-
 # Extract correlations for morpho variables
 cor_var_surf <- as.data.frame(pca_surf$var$coord)
 cor_var_surf <- cor_var_surf %>% mutate(factor_col = factor_vec)
-threshold <- 0.15 # Set a threshold for correlation of 15%
+threshold <- 0.10 # Set a threshold for correlation of 10%
 filtered_descriptors_scores_Dim1_Dim2_surf <-
   cor_var_surf[apply(cor_var_surf[, c("Dim.1", "Dim.2")], 1, function(x)
     any(abs(x) > threshold)),]
@@ -409,7 +528,6 @@ filtered_descriptors_scores_Dim3_Dim4_surf <-
 
 # Prepare color palette
 Paired_morpho <- palette.colors(palette = "Paired")[c(2, 4, 6, 8)]
-#Paired_year <- palette.colors(palette = "Paired")[c(2, 4, 6, 8)]
 
 # This is just for graphic tweaking
 centroid_cruise_season_surf <-
@@ -418,6 +536,84 @@ centroid_cruise_season_surf <-
     list(Cruise_season = stations_scores_surf$Cruise_season),
     mean
   )
+
+#
+base_pca_plot_PC1_PC2_surf <-
+  ggmorph_tile(
+    pca_biotic_surf,
+    img_png_surf,
+    dimensions = c(1, 2),
+    steps = morphr_steps,
+    n_imgs = morphr_imgs,
+    scale = morphr_scale,
+    adjust_grey = FALSE,
+    fun = img_chop,
+    bottom = 31
+  ) +
+  geom_segment(
+    data = filtered_descriptors_scores_Dim1_Dim2_surf,
+    aes(
+      x = 0,
+      y = 0,
+      xend = Dim.1 * axis_size,
+      yend = Dim.2 * axis_size,
+      color = factor_col
+    ),
+    size = 1,
+    alpha = 0.9,
+    arrow = arrow(length = unit(0.2, "cm"))
+  ) +
+  geom_point(
+    data = centroid_cruise_season_surf,
+    aes(x = Dim.1, y = Dim.2, fill = Cruise_season),
+    alpha = 0,
+    size = 0.01,
+    pch = 21
+  )
+
+#
+base_pca_plot_PC3_PC4_surf <-
+  ggmorph_tile(
+    pca_biotic_surf,
+    img_png_surf,
+    dimensions = c(3, 4),
+    steps = morphr_steps,
+    n_imgs = morphr_imgs,
+    scale = morphr_scale,
+    adjust_grey = FALSE,
+    fun = img_chop,
+    bottom = 31
+  ) +
+  geom_segment(
+    data = filtered_descriptors_scores_Dim3_Dim4_surf,
+    aes(
+      x = 0,
+      y = 0,
+      xend = Dim.3 * axis_size,
+      yend = Dim.4 * axis_size,
+      color = factor_col
+    ),
+    size = 1,
+    alpha = 0.9,
+    arrow = arrow(length = unit(0.2, "cm"))
+  ) +
+  geom_point(
+    data = centroid_cruise_season_surf,
+    aes(x = Dim.3, y = Dim.4, fill = Cruise_season),
+    alpha = 0,
+    size = 0.01,
+    pch = 21
+  )
+
+# Get the limits for x and y axes from the first plot
+x_limits_PC1_PC2_surf <-
+  ggplot_build(base_pca_plot_PC1_PC2_surf)$layout$panel_scales_x[[1]]$range$range
+y_limits_PC1_PC2_surf <-
+  ggplot_build(base_pca_plot_PC1_PC2_surf)$layout$panel_scales_y[[1]]$range$range
+x_limits_PC3_PC4_surf <-
+  ggplot_build(base_pca_plot_PC3_PC4_surf)$layout$panel_scales_x[[1]]$range$range
+y_limits_PC3_PC4_surf <-
+  ggplot_build(base_pca_plot_PC3_PC4_surf)$layout$panel_scales_y[[1]]$range$range
 
 # Create PCA plot for PC1 vs PC2
 base_pca_plot_PC1_PC2_surf <-
@@ -455,15 +651,18 @@ base_pca_plot_PC1_PC2_surf <-
   geom_text_repel(
     data = filtered_descriptors_scores_Dim1_Dim2_surf,
     aes(
-      x = Dim.1 * (axis_size + 0.2),
-      y = Dim.2 * (axis_size + 0.2),
+      x = Dim.1 * (axis_size + 0.4),
+      y = Dim.2 * (axis_size + 0.4),
       label = rownames(filtered_descriptors_scores_Dim1_Dim2_surf),
       color = factor_col
     ),
     size = text_size,
     alpha = 1,
     segment.alpha = 0.2,
-    max.overlaps = Inf
+    max.overlaps = Inf,
+    force = 10,
+    box.padding = unit(0.5, "lines"),
+    min.segment.length = 0
   ) +
   geom_point(
     data = centroid_CruiseSeason_DayNight_surf,
@@ -486,8 +685,19 @@ base_pca_plot_PC1_PC2_surf <-
     color = "Morpho descriptor",
     title = paste(" ")
   ) +
-  scale_x_continuous(breaks = 0) +
-  scale_y_continuous(breaks = 0) +
+  scale_color_manual(values = Paired_morpho) +
+  labs(x = text1_PC1_PC2_surf, y = text2_PC1_PC2_surf, title = paste(" ")) +
+  coord_fixed(ratio = 1) +
+  scale_x_continuous(
+    limits = x_limits_PC1_PC2_surf,
+    breaks = c(x_limits_PC1_PC2_surf[1], 0, x_limits_PC1_PC2_surf[2]),
+    labels = number_format(accuracy = 0.1)
+  ) +
+  scale_y_continuous(
+    limits = y_limits_PC1_PC2_surf,
+    breaks = c(y_limits_PC1_PC2_surf[1], 0, y_limits_PC1_PC2_surf[2]),
+    labels = number_format(accuracy = 0.1)
+  ) +
   coord_fixed(ratio = 1) +
   theme_bw() +
   theme(
@@ -499,18 +709,18 @@ base_pca_plot_PC1_PC2_surf <-
     legend.text = element_text(size = larger_legend_size),
     legend.title = element_text(size = larger_legend_size),
     legend.position = "bottom",
-    legend.box = "vertical"
+    legend.box = "vertical",
+    legend.key.size = unit(1, 'cm')
   ) +
-  guides(color = guide_legend(override.aes = aes(label = ""))) +
-  theme(plot.margin = margin(
-    t = 0,
-    r = 0,
-    b = 0,
-    l = 0
-  ))
+  labs(fill = "Day / Night", color = "Morphological descriptors", shape = "Sampling seasons") +
+  guides(color = guide_legend(override.aes = (aes(label = ""))),
+         fill = guide_legend(override.aes = list(
+           shape = 22,
+           size = 6,
+           alpha = 1
+         )))
 #
 base_pca_plot_PC1_PC2_surf <- base_pca_plot_PC1_PC2_surf +
-  theme(legend.position = "none") +
   geom_text(
     aes(x = -Inf, y = Inf, label = "A"),
     hjust = -0.5,
@@ -523,6 +733,7 @@ base_pca_plot_PC1_PC2_surf <- base_pca_plot_PC1_PC2_surf +
   ggtitle(paste0("Morphological space (n = ", n_individuals_surf, ")")) +
   theme(plot.title = element_text(color = "black", size = title_size, face =
                                     "bold"))
+
 
 # Create PCA plot for PC3 vs PC4
 base_pca_plot_PC3_PC4_surf <-
@@ -560,15 +771,18 @@ base_pca_plot_PC3_PC4_surf <-
   geom_text_repel(
     data = filtered_descriptors_scores_Dim3_Dim4_surf,
     aes(
-      x = Dim.3 * (axis_size + 0.2),
-      y = Dim.4 * (axis_size + 0.2),
+      x = Dim.3 * (axis_size + 0.4),
+      y = Dim.4 * (axis_size + 0.4),
       label = rownames(filtered_descriptors_scores_Dim3_Dim4_surf),
       color = factor_col
     ),
     size = text_size,
     alpha = 1,
     segment.alpha = 0.2,
-    max.overlaps = Inf
+    max.overlaps = Inf,
+    force = 10,
+    box.padding = unit(0.5, "lines"),
+    min.segment.length = 0
   ) +
   geom_point(
     data = centroid_CruiseSeason_DayNight_surf,
@@ -591,8 +805,16 @@ base_pca_plot_PC3_PC4_surf <-
     color = "Morpho descriptor",
     title = paste(" ")
   ) +
-  scale_x_continuous(breaks = 0) +
-  scale_y_continuous(breaks = 0) +
+  scale_x_continuous(
+    limits = x_limits_PC3_PC4_surf,
+    breaks = c(x_limits_PC3_PC4_surf[1], 0, x_limits_PC3_PC4_surf[2]),
+    labels = scales::number_format(accuracy = 0.1)
+  ) +
+  scale_y_continuous(
+    limits = y_limits_PC3_PC4_surf,
+    breaks = c(y_limits_PC3_PC4_surf[1], 0, y_limits_PC3_PC4_surf[2]),
+    labels = scales::number_format(accuracy = 0.1)
+  ) +
   coord_fixed(ratio = 1) +
   theme_bw() +
   theme(
@@ -613,20 +835,13 @@ base_pca_plot_PC3_PC4_surf <-
            shape = 22,
            size = 6,
            alpha = 1
-         ))) +
-  theme(plot.margin = margin(
-    t = 0,
-    r = 0,
-    b = 0,
-    l = 0
-  ))
-# Extract legend from one of the density plots
-shared_legend_surf <- ggfun::get_legend(base_pca_plot_PC3_PC4_surf)
+         )))
+
 #
 base_pca_plot_PC3_PC4_surf <- base_pca_plot_PC3_PC4_surf +
-  theme(legend.position = "none") +
+  #theme(legend.position = "none") +
   geom_text(
-    aes(x = -Inf, y = Inf, label = "B"),
+    aes(x = -Inf, y = Inf, label = "A"),
     hjust = -0.5,
     vjust = 1.5,
     fontface = "bold",
@@ -638,15 +853,6 @@ base_pca_plot_PC3_PC4_surf <- base_pca_plot_PC3_PC4_surf +
   theme(plot.title = element_text(color = "black", size = title_size, face =
                                     "bold"))
 
-# Get the limits for x and y axes from the first plot
-x_limits_PC1_PC2_surf <-
-  ggplot_build(base_pca_plot_PC1_PC2_surf)$layout$panel_scales_x[[1]]$range$range
-y_limits_PC1_PC2_surf <-
-  ggplot_build(base_pca_plot_PC1_PC2_surf)$layout$panel_scales_y[[1]]$range$range
-x_limits_PC3_PC4_surf <-
-  ggplot_build(base_pca_plot_PC3_PC4_surf)$layout$panel_scales_x[[1]]$range$range
-y_limits_PC3_PC4_surf <-
-  ggplot_build(base_pca_plot_PC3_PC4_surf)$layout$panel_scales_y[[1]]$range$range
 
 # Create a base plot without descriptor variables for PC1/PC2
 base_pca_plot_no_descriptors_PC1_PC2_surf <-
@@ -662,12 +868,18 @@ base_pca_plot_no_descriptors_PC1_PC2_surf <-
     bottom = 31
   ) +
   scale_color_manual(values = Paired_morpho) +
-  scale_x_continuous(breaks = 0) +
-  scale_y_continuous(breaks = 0) +
   labs(x = text1_PC1_PC2_surf, y = text2_PC1_PC2_surf, title = paste(" ")) +
   coord_fixed(ratio = 1) +
-  scale_x_continuous(limits = x_limits_PC1_PC2_surf, breaks = 0) +
-  scale_y_continuous(limits = y_limits_PC1_PC2_surf / 2, breaks = 0) +
+  scale_x_continuous(
+    limits = x_limits_PC1_PC2_surf,
+    breaks = c(x_limits_PC1_PC2_surf[1], 0, x_limits_PC1_PC2_surf[2]),
+    labels = number_format(accuracy = 0.1)
+  ) +
+  scale_y_continuous(
+    limits = y_limits_PC1_PC2_surf / 2,
+    breaks = c(y_limits_PC1_PC2_surf[1] / 2, 0, y_limits_PC1_PC2_surf[2] / 2),
+    labels = number_format(accuracy = 0.1)
+  ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(size = legend_size),
@@ -699,26 +911,23 @@ biotic_plot_PC1_PC2_surf <-
   geom_text_repel(
     data = filtered_sup_biotic_Dim1_Dim2_surf,
     aes(
-      x = Dim.1 * (axis_size + 0.2),
-      y = Dim.2 * (axis_size + 0.2),
+      x = Dim.1 * (axis_size + 0.4),
+      y = Dim.2 * (axis_size + 0.4),
       label = rownames(filtered_sup_biotic_Dim1_Dim2_surf)
     ),
     color = "black",
     size = text_size,
     alpha = 0.9,
     segment.alpha = 0.2,
-    max.overlaps = Inf
+    max.overlaps = Inf,
+    force = 10,
+    box.padding = unit(0.5, "lines"),
+    min.segment.length = 0
   ) + ggtitle("Biotic variables") +
   theme(plot.title = element_text(color = "black", size = title_size, face =
                                     "bold")) +
-  theme(plot.margin = margin(
-    t = 0,
-    r = 0,
-    b = 0,
-    l = 0
-  )) +
   geom_text(
-    aes(x = -Inf, y = Inf, label = "E"),
+    aes(x = -Inf, y = Inf, label = "C"),
     hjust = -0.5,
     vjust = 1.5,
     fontface = "bold",
@@ -743,26 +952,23 @@ abiotic_plot_PC1_PC2_surf <-
   geom_text_repel(
     data = filtered_sup_abiotic_Dim1_Dim2_surf,
     aes(
-      x = Dim.1 * (axis_size + 0.2),
-      y = Dim.2 * (axis_size + 0.2),
+      x = Dim.1 * (axis_size + 0.4),
+      y = Dim.2 * (axis_size + 0.4),
       label = rownames(filtered_sup_abiotic_Dim1_Dim2_surf)
     ),
     color = "black",
     size = text_size,
     alpha = 0.9,
     segment.alpha = 0.2,
-    max.overlaps = Inf
+    max.overlaps = Inf,
+    force = 10,
+    box.padding = unit(0.5, "lines"),
+    min.segment.length = 0
   ) + ggtitle("Abiotic variables") +
   theme(plot.title = element_text(color = "black", size = title_size, face =
                                     "bold")) +
-  theme(plot.margin = margin(
-    t = 0,
-    r = 0,
-    b = 0,
-    l = 0
-  )) +
   geom_text(
-    aes(x = -Inf, y = Inf, label = "C"),
+    aes(x = -Inf, y = Inf, label = "B"),
     hjust = -0.5,
     vjust = 1.5,
     fontface = "bold",
@@ -785,8 +991,16 @@ base_pca_plot_no_descriptors_PC3_PC4_surf <-
   scale_color_manual(values = Paired_morpho) +
   labs(x = text1_PC3_PC4_surf, y = text2_PC3_PC4_surf, title = paste(" ")) +
   coord_fixed(ratio = 1) +
-  scale_x_continuous(limits = x_limits_PC3_PC4_surf, breaks = 0) +
-  scale_y_continuous(limits = y_limits_PC3_PC4_surf / 2, breaks = 0) +
+  scale_x_continuous(
+    limits = x_limits_PC3_PC4_surf,
+    breaks = c(x_limits_PC3_PC4_surf[1], 0, x_limits_PC3_PC4_surf[2]),
+    labels = number_format(accuracy = 0.1)
+  ) +
+  scale_y_continuous(
+    limits = y_limits_PC3_PC4_surf / 2,
+    breaks = c(y_limits_PC3_PC4_surf[1] / 2, 0, y_limits_PC3_PC4_surf[2] / 2),
+    labels = number_format(accuracy = 0.1)
+  ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(size = legend_size),
@@ -818,26 +1032,23 @@ biotic_plot_PC3_PC4_surf <-
   geom_text_repel(
     data = filtered_sup_biotic_Dim3_Dim4_surf,
     aes(
-      x = Dim.3 * (axis_size + 0.2),
-      y = Dim.4 * (axis_size + 0.2),
+      x = Dim.3 * (axis_size + 0.4),
+      y = Dim.4 * (axis_size + 0.4),
       label = rownames(filtered_sup_biotic_Dim3_Dim4_surf)
     ),
     color = "black",
     size = text_size,
     alpha = 0.9,
     segment.alpha = 0.2,
-    max.overlaps = Inf
+    max.overlaps = Inf,
+    force = 10,
+    box.padding = unit(0.5, "lines"),
+    min.segment.length = 0
   ) + ggtitle("Biotic variables") +
   theme(plot.title = element_text(color = "black", size = title_size, face =
                                     "bold")) +
-  theme(plot.margin = margin(
-    t = 0,
-    r = 0,
-    b = 0,
-    l = 0
-  )) +
   geom_text(
-    aes(x = -Inf, y = Inf, label = "F"),
+    aes(x = -Inf, y = Inf, label = "C"),
     hjust = -0.5,
     vjust = 1.5,
     fontface = "bold",
@@ -862,82 +1073,57 @@ abiotic_plot_PC3_PC4_surf <-
   geom_text_repel(
     data = filtered_sup_abiotic_Dim3_Dim4_surf,
     aes(
-      x = Dim.3 * (axis_size + 0.2),
-      y = Dim.4 * (axis_size + 0.2),
+      x = Dim.3 * (axis_size + 0.4),
+      y = Dim.4 * (axis_size + 0.4),
       label = rownames(filtered_sup_abiotic_Dim3_Dim4_surf)
     ),
     color = "black",
     size = text_size,
     alpha = 0.9,
     segment.alpha = 0.2,
-    max.overlaps = Inf
+    max.overlaps = Inf,
+    force = 10,
+    box.padding = unit(0.5, "lines"),
+    min.segment.length = 0
   ) + ggtitle("Abiotic variables") +
   theme(plot.title = element_text(color = "black", size = title_size, face =
                                     "bold")) +
-  theme(plot.margin = margin(
-    t = 0,
-    r = 0,
-    b = 0,
-    l = 0
-  )) +
   geom_text(
-    aes(x = -Inf, y = Inf, label = "D"),
+    aes(x = -Inf, y = Inf, label = "B"),
     hjust = -0.5,
     vjust = 1.5,
     fontface = "bold",
     size = 10
   )
 
-# Create the combined plots for the third and fourth rows
-combined_row_surf_1 <- arrangeGrob(base_pca_plot_PC1_PC2_surf, base_pca_plot_PC3_PC4_surf,
-                                   ncol = 2)
-combined_row_surf_2 <- arrangeGrob(abiotic_plot_PC1_PC2_surf, abiotic_plot_PC3_PC4_surf,
-                                   ncol = 2)
-combined_row_surf_3 <- arrangeGrob(biotic_plot_PC1_PC2_surf, biotic_plot_PC3_PC4_surf,
-                                   ncol = 2)
-
-# Define a spacer
-spacer <- rectGrob(gp = gpar(col = NA))
-
-# Create a title grob
-title_grob_surf <-
-  textGrob(
-    "Surface Copepods",
-    x = 0.05,
-    y = 0.5,
-    hjust = 0,
-    gp = gpar(fontsize = 30, fontface = "bold")
-  )
-
-# Final arrangement with labels
-grid.arrange(
-  title_grob_surf,
-  combined_row_surf_1,
-  spacer,
-  shared_legend_surf,
-  spacer,
-  combined_row_surf_2,
-  spacer,
-  combined_row_surf_3,
-  ncol = 2,
-  heights = c(0.2, 0.9, 0.02, 0.25, 0.02, 0.5, 0.02, 0.5),
-  layout_matrix = rbind(c(1, 1),
-                        c(2, 2),
-                        c(3, 3),
-                        c(4, 4),
-                        c(5, 5),
-                        c(6, 6),
-                        c(7, 7),
-                        c(8, 8))
+#
+Fig1 <- grid.arrange(
+  base_pca_plot_PC1_PC2_surf,
+  abiotic_plot_PC1_PC2_surf,
+  biotic_plot_PC1_PC2_surf,
+  ncol = 1,
+  heights = c(4.5, 2, 2)
 )
 
+#
+Fig2 <- grid.arrange(
+  base_pca_plot_PC3_PC4_surf,
+  abiotic_plot_PC3_PC4_surf,
+  biotic_plot_PC3_PC4_surf,
+  ncol = 1,
+  heights = c(4.5, 2, 2)
+)
 
+#
+ggsave("Fig1.png", plot = Fig1, units = "in", width = 9, height = 20, dpi = 450, device = "png")
+ggsave("Fig2.png", plot = Fig2, units = "in", width = 9, height = 20, dpi = 450, device = "png")
 
 ```
 
 
 
-# V. Suplementary graphs
+
+# III. Suplementary graphs
 
 
 ## a) MLD depth between Cruise 
@@ -953,76 +1139,19 @@ ind_data_site <- ind_data %>%
     fluo = mean(Fluo, na.rm = TRUE)
   )
 
-# Cruise_season as a factor
-ind_data_site$Cruise_season <-
-  as.factor(ind_data_site$Cruise_season)
-
-# Plot for Temperature
-Temp_Plot <-
-  ggplot(ind_data_site,
-         aes(y = temp, x = Cruise_season, fill = Cruise_season)) +
-  geom_boxplot() +
-  geom_jitter(
-    size = 0.5,
-    alpha = 0.8,
-    shape = 19,
-    aes(color = Cruise_season)
-  ) +
-  theme_bw() +
-  theme(legend.position = "none") +
-  scale_fill_manual(values = Paired_year) +
-  scale_color_manual(values = Paired_year) +
-  labs(title = "Temperature between cruises (0-100 m)", y = "Temperature (°C)", x = "Cruise") +
-  geom_text(
-    aes(x = -Inf, y = Inf, label = "A"),
-    hjust = -0.5,
-    vjust = 1.5,
-    fontface = "bold",
-    size = 10
-  )
-
-# Plot for Fluorescence
-Fluo_Plot <-
-  ggplot(ind_data_site,
-         aes(y = fluo, x = Cruise_season, fill = Cruise_season)) +
-  geom_boxplot() +
-  geom_jitter(
-    size = 0.5,
-    alpha = 0.8,
-    shape = 19,
-    aes(color = Cruise_season)
-  ) +
-  theme_bw() +
-  theme(legend.position = "none") +
-  scale_fill_manual(values = Paired_year) +
-  scale_color_manual(values = Paired_year) +
-  labs(title = "In situ fluorescence between cruises (0-100 m)", y = "Fluorescence (mg.m-3)", x = "Cruise") +
-  geom_text(
-    aes(x = -Inf, y = Inf, label = "B"),
-    hjust = -0.5,
-    vjust = 1.5,
-    fontface = "bold",
-    size = 10
-  )
-
-# Final arrangement with labels
-grid.arrange(
-  Temp_Plot,
-  Fluo_Plot,
-  ncol = 1,
-  heights = c(1, 1),
-  layout_matrix = rbind(c(1, 1),
-                        c(2, 2))
-)
-
 # Plot for MLD
-ggplot(ind_data_site, aes(x = Site, y = mld, color = Site)) +
+FigS2 <- ggplot(ind_data_site, aes(x = Site, y = mld, color = Site)) +
   facet_wrap( ~ Cruise_season) +
   geom_point() +
   theme_bw() +
   theme(legend.position = "none") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(title = "MLD depth between cruises", y = "Epipalgic layer depth (m)", x = "Cycle")
+  labs(#title = "Surface layer depth between cruises", 
+       y = "Surface layer depth (m)", 
+       x = "Cycle")
+
+#
+ggsave("FigS2.png", plot = FigS2, units = "in", width = 6, height = 6, dpi = 450, device = "png")
 
 
 ```
@@ -1034,111 +1163,99 @@ ggplot(ind_data_site, aes(x = Site, y = mld, color = Site)) +
 # Number of images to extract
 n <- 50
 
-# Create function to extract images for specified dimension combinations
-create_combined_plot <-
-  function(df,
-           dim1_name,
-           dim2_name,
-           dim1_sign,
-           dim2_sign) {
-    # Initialize title
-    title <-
-      paste(
-        ifelse(dim1_sign, "Positive", "Negative"),
-        dim1_name,
-        "&",
-        ifelse(dim2_sign, "Positive", "Negative"),
-        dim2_name
-      )
-    # Filter for the required sign combinations for both dimensions
-    df_filtered <- df %>%
-      filter((!!sym(dim1_name) > 0) == dim1_sign &
-               (!!sym(dim2_name) > 0) == dim2_sign) %>%
-      arrange(desc(abs(!!sym(dim1_name))), desc(abs(!!sym(dim2_name)))) %>%
-      head(n)
-    # Select images for the filtered entries
-    images <-
-      str_c(
-        "/Users/ruben/Documents/_Thèse/Analyses/Data_and_codes_Supp_Info/picture/",
-        df_filtered$orig_id,
-        ".jpg"
-      )
-    # Sample 50 images randomly if there are more than 50 images
-    images <-
-      sample(images, size = min(n, length(images)), replace = FALSE)
-    # Create the plot with the images
-    plot <-
-      ggimg_grid(images,
-                 scale = 0.0020,
-                 fun = img_chop,
-                 bottom = 31) +
-      labs(title = title) +
-      theme(plot.title = element_text(hjust = 0.5, size = 15))
-    return(plot)
-  }
-
-# List of dimension pairs (PC1/PC2 and PC3/PC4)
-dim_pairs <- list(c("Dim.1", "Dim.2"), c("Dim.3", "Dim.4"))
-
-# Create all possible combinations of positive and negative values for the dimensions
-sign_combinations <-
-  expand.grid(dim1_sign = c(FALSE, TRUE),
-              dim2_sign = c(FALSE, TRUE))
-
-# Function to create four plots for both pairs of dimensions
-create_plots <- function(df, dim_pair) {
-  purrr::map(seq_len(nrow(sign_combinations)), function(i) {
-    create_combined_plot(
-      df,
-      dim_pair[[1]],  # Ensure correct indexing
-      dim_pair[[2]],
-      sign_combinations$dim1_sign[[i]],  # Use double brackets for safe extraction
-      sign_combinations$dim2_sign[[i]]
+# Function to extract images for a specific dimension and extreme values,
+# sampling randomly among the worst/best 10%.
+create_extreme_plot <- function(df, dim_name, extreme) {
+  # Set title
+  title <- paste(ifelse(extreme == "max", "Max", "Min"), dim_name)
+  
+  # Compute quantile threshold
+  q_threshold <- quantile(
+    df[[dim_name]],
+    ifelse(extreme == "max", 0.90, 0.10),
+    na.rm = TRUE
+  )
+  
+  # Filter to the top/bottom 10%
+  df_extreme <- df %>%
+    filter(
+      if (extreme == "max") 
+        !!sym(dim_name) >= q_threshold 
+      else 
+        !!sym(dim_name) <= q_threshold
     )
-  })
+  
+  # Determine how many to sample (constant)
+  n_available <- nrow(df_extreme)
+  n_to_sample  <- min(n, n_available)
+  
+  # Randomly sample that many rows
+  df_sampled <- df_extreme %>%
+    slice_sample(n = n_to_sample)
+  
+  # Build file paths
+  images <- str_c(
+    "/Users/ruben/Documents/_Thèse/Analyses/Data_and_codes_Supp_Info/picture/",
+    df_sampled$orig_id, ".jpg"
+  )
+  
+  # Plot grid of those randomly chosen images
+  ggimg_grid(images, scale = 0.004, fun = img_chop, bottom = 31) +
+    labs(title = title) +
+    theme(plot.title = element_text(hjust = 0.5, size = 20))
 }
 
-# Create a list of plots 
-plots_surf_dim1_2 <-
-  create_plots(stations_scores_surf, dim_pairs[[1]])
-plots_surf_dim3_4 <-
-  create_plots(stations_scores_surf, dim_pairs[[2]])
 
-# Create text grobs for above MLD
-above_mld_label <-
-  textGrob("Surface Copepods", gp = gpar(fontsize = 20, fontface = "bold"))
+# List of dimensions with new names
+dims <- c("PC1", "PC2", "PC3", "PC4")
 
-# Arrange plot for a better understanding
-plots_surf_dim1_2_grid <- arrangeGrob(
-  plots_surf_dim1_2[[3]],
-  plots_surf_dim1_2[[4]],
-  plots_surf_dim1_2[[1]],
-  plots_surf_dim1_2[[2]],
-  nrow = 2
-)
-plots_surf_dim3_4_grid <- arrangeGrob(
-  plots_surf_dim3_4[[3]],
-  plots_surf_dim3_4[[4]],
-  plots_surf_dim3_4[[1]],
-  plots_surf_dim3_4[[2]],
-  nrow = 2
-)
-
-# Final arrangement with labels
-grid.arrange(
-  above_mld_label,
-  plots_surf_dim1_2_grid,
-  plots_surf_dim3_4_grid,
-  nrow = 2,
-  ncol = 2,
-  heights = c(0.1, 1.2),
-  layout_matrix = rbind(c(1, 1),
-                        c(2, 3)
+# Generate plots for max and min values of each dimension
+plots_surf <- lapply(seq_along(dims), function(i) {
+  dim <- paste0("Dim.", i)  # Original column names in data
+  list(
+    create_extreme_plot(stations_scores_surf, dim, "max") +
+      ggtitle(paste("Positive", dims[i])),
+    create_extreme_plot(stations_scores_surf, dim, "min") +
+      ggtitle(paste("Negative", dims[i]))
   )
+})
+
+# Flatten list for grid arrangement
+plots_surf_flat <- unlist(plots_surf, recursive = FALSE)
+
+# Create text grob for label
+above_mld_label <- textGrob("Surface Copepods", gp = gpar(fontsize = 20, fontface = "bold"))
+
+# Arrange plots for Dim1/Dim2 in a 3x3 grid
+plots_surf_dim1_2_grid <- arrangeGrob(
+  nullGrob(), plots_surf_flat[[3]], nullGrob(),
+  plots_surf_flat[[2]], nullGrob(), plots_surf_flat[[1]],
+  nullGrob(), plots_surf_flat[[4]], nullGrob(),
+  nrow = 3, ncol = 3
 )
+
+# Arrange plots for Dim3/Dim4 in a 3x3 grid
+plots_surf_dim3_4_grid <- arrangeGrob(
+  nullGrob(), plots_surf_flat[[7]], nullGrob(),
+  plots_surf_flat[[6]], nullGrob(), plots_surf_flat[[5]],
+  nullGrob(), plots_surf_flat[[8]], nullGrob(),
+  nrow = 3, ncol = 3
+)
+
+FigS4 <- grid.arrange(
+  plots_surf_dim1_2_grid,
+  nullGrob(),
+  plots_surf_dim3_4_grid,
+  layout_matrix = rbind(
+    c(1, 2, 3)
+  ),
+  widths = c(1, 0.1, 1),
+  heights = 1
+)
+
+# Extract graph
+ggsave("FigS4.png", plot = FigS4, units = "in", width = 14, height = 8, dpi = 450, device = "png")
 
 ```
-
-
 
 
